@@ -1,12 +1,12 @@
 import encryption
 import decryption
 import createKey
-from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 import os
+
+from flask import Flask, render_template, request
+server = Flask(__name__)
 
 class App:
     @staticmethod
@@ -26,10 +26,17 @@ App.KeyGeneration()
 
 private_key = ec.generate_private_key(ec.SECP256R1(), default_backend()) 
 
-# Encryption
-message = input("Please Enter The Message: ")
-App.DataEncrypt(message, private_key)
+@server.route("/sendMsg", methods=["GET", "POST"])
+def send_message():
 
-# Decryption
-App.DataDecrypt(private_key)
+    form_data = request.form
+    
+    # # Encryption
+    App.DataEncrypt(form_data["message"], private_key)
 
+    # # Decryption
+    App.DataDecrypt(private_key)
+
+    return render_template("sendMsg.html")
+
+server.run(debug=True)
