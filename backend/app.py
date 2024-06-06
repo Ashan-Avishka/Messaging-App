@@ -8,17 +8,18 @@ from cryptography.hazmat.backends import default_backend
 from Crypto.Cipher import DES3
 from Crypto.Random import get_random_bytes
 import base64
+from db_config import get_db_connection
 
 app = Flask(__name__)
 app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
 CORS(app)  # To allow cross-origin requests from your React frontend
 
 # Dummy user data
-users = {
-    'user1@example.com': 'password1',
-    'user2@example.com': 'password2',
-    'user3@example.com': 'password3'
-}
+# users = {
+#     'user1@example.com': 'password1',
+#     'user2@example.com': 'password2',
+#     'user3@example.com': 'password3'
+# }
 
 user_data = {
     'user1@example.com': {'name': 'User One', 'email': 'user1@example.com'},
@@ -26,24 +27,84 @@ user_data = {
     'user3@example.com': {'name': 'User Three', 'email': 'user3@example.com'}
 }
 
+# fetch all users data from database
+def get_all_users():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    
+    query = "SELECT * FROM users"  
+    cursor.execute(query)
+    
+    users = cursor.fetchall()
+    
+    cursor.close()
+    connection.close()
+    
+    return users
+
+# check that email is already exists or not
+def email_exists(email):
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    
+    query = "SELECT * FROM users WHERE email = %s"
+    cursor.execute(query, (email,))
+    
+    user = cursor.fetchone()
+    
+    cursor.close()
+    connection.close()
+    
+    return user is not None
+
+def create_user(username, email, password):
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    cursor.execute("INSERT INTO users (username, email, password) VALUES (%s, %s, %s)", (username, email, password))
+    connection.commit()
+
+
 @app.route('/api/signup', methods=['POST'])
 def signup():
+
     data = request.json
+    username = data.get('username')
     email = data.get('email')
     password = data.get('password')
-    if email in users:
+
+    if email_exists(email):
         return jsonify({"error": "User already exists"}), 400
-    users[email] = password
-    return jsonify({"message": "User created successfully"}), 201
+    else:
+        create_user(username, email, password)
+        return jsonify({"message": "User created successfully"}), 201
+    
 
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
+    
     email = data.get('email')
     password = data.get('password')
-    if users.get(email) != password:
+
+    if not email or not password:
+        return jsonify({"error": "Email and password are required"}), 400
+
+    users = get_all_users()
+    user = next((u for u in users if u['email'] == email), None)
+
+    if user and user['password'] == password:
+        return jsonify({"message": "Login successful", "user": user}), 200
+    else:
         return jsonify({"error": "Invalid credentials"}), 401
-    return jsonify({"message": "Login successful", "user": user_data[email]}), 200
+
+
+
+
+
+
+
+
 
 db = mysql.connector.connect(
     host="localhost",
