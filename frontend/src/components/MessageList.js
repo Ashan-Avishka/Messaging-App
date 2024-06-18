@@ -9,7 +9,6 @@ const MessageList = ({ messages }) => {
         <MessageItem
           key={index}
           message={message}
-          isSender={message.sender === 'You'} 
         />
       ))}
     </div>

@@ -25,39 +25,62 @@ const ChatPage = () => {
     fetchUsers();
   }, []);  
 
-  const fetchMessages = async (chatId) => {
+  const fetchMessages = async (chatId, username) => {
     try {
       var msgList = [];
+      var sender = '';
+      var message = '';
+      var msgType = '';
+      var timestamp = '';
       const messageResponse = await getMessages(chatId);
 
-      for (let i = 0; i < messageResponse.data.messages.length; i++) {
-        
-        const sender = messageResponse.data.messages[i];
-        const message = messageResponse.data.messages[i];
-        const timestamp = messageResponse.data.timestamps[i];
-        
-        var newMessage = {
-          sender: "you",
-          text:message,
-          timestamp: timestamp 
-        };
-        msgList.push(newMessage);
+      if(messageResponse.data.message == "No message found for this user"){
+        console.error('No message found for this user');
+      }
+      else if(messageResponse.data.message == "Private key not found"){
+        console.error('Private key not found');
+      }
+      else{
+
+        for (let i = 0; i < messageResponse.data.messages.length; i++) {
+
+          if(messageResponse.data.msg_types[i] == 'sent') {
+            sender = 'You';
+            message = messageResponse.data.messages[i];
+            msgType = messageResponse.data.msg_types[i];
+            timestamp = messageResponse.data.timestamps[i];
+            console.log(msgType);
+          }
+          else if(messageResponse.data.msg_types[i] == 'received') {
+            sender = username;
+            message = messageResponse.data.messages[i];
+            msgType = messageResponse.data.msg_types[i];
+            timestamp = messageResponse.data.timestamps[i];
+            console.log(msgType);
+          }
+  
+          var newMessage = {
+            sender: sender,
+            text:message,
+            msgType:msgType,
+            timestamp: timestamp 
+          };
+          msgList.push(newMessage);
+        }
+        setMessages(msgList);
+
       }
 
-      setMessages(msgList);
-
-      
-      // setMessages(messageResponse.data);
     } catch (error) {
       console.error('Error fetching messages', error);
       setError('Error fetching messages');
     }
   };
 
-  const handleChatClick = (chatId) => {
-    console.log('handleChatClick', chatId);
+  const handleChatClick = (chatId, username) => {
+    console.log('handleChatClick', username);
     setSelectedChatId(chatId);
-    fetchMessages(chatId);
+    fetchMessages(chatId, username);
   };
 
   const handleSend = async (text) => {
@@ -65,6 +88,7 @@ const ChatPage = () => {
       sender: "You",
       reciever: selectedChatId,
       text,
+      msgType:'sent',
       timestamp: new Date().toISOString()  
     };
     setMessages([...messages, newMessage]);  
@@ -96,7 +120,7 @@ const ChatPage = () => {
         
         <ul className="user-list">
           {users.map(user => (
-            <li key={user.id} className="user-item" onClick={() => handleChatClick(user.uid)}>
+            <li key={user.id} className="user-item" onClick={() => handleChatClick(user.uid, user.username)}>
               <FontAwesomeIcon icon={faUserCircle} className='user-icon' />
               <span className="user-name">{user.username}</span>
             </li>

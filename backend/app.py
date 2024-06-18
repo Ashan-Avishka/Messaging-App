@@ -50,21 +50,6 @@ def get_all_users():
     return users
 
 
-def get_all_messages():
-    connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
-    
-    query = "SELECT * FROM message" 
-    cursor.execute(query)
-    
-    messages = cursor.fetchall()
-    
-    cursor.close()
-    connection.close()
-    
-    return messages
-
-
 # check that email is already exists or not
 def email_exists(email):
     connection = get_db_connection()
@@ -136,18 +121,6 @@ def user_list():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/messages', methods=['GET'])
-def load_messages():
-    try:
-        messages = get_all_messages()
-        return jsonify(messages), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-
-
-
 @app.route('/api/messages', methods=['POST'])
 def encrypt():
     try:
@@ -215,38 +188,54 @@ def encrypt():
     
 
 
+
 @app.route('/api/messages/decrypt', methods=['POST'])
 def decrypt_messages():
     try:
         data = request.json
         sender_uid = session.get('user_id')
         receiver_uid = data.get('receiver')
+        msg_type = ''
 
         # Hash the receiver UID to match the stored value
         hashed_receiver_uid = hashlib.sha256(str(receiver_uid).encode('utf-8')).hexdigest()
         hashed_sender_uid = hashlib.sha256(str(sender_uid).encode('utf-8')).hexdigest()
 
         # Retrieve the encrypted message and keys from the database for the specific user
-        cursor.execute('SELECT sendMessage, public_key, encrypted_des3_key, nonce, tag, timestamp FROM message WHERE (RUID=%s AND SUID=%s) OR (RUID=%s AND SUID=%s)', (hashed_receiver_uid, hashed_sender_uid, hashed_sender_uid, hashed_receiver_uid))
-        result = cursor.fetchall()
-        if not result:
+        cursor.execute('SELECT sendMessage, SUID, RUID, public_key, encrypted_des3_key, nonce, tag, timestamp FROM message WHERE (RUID=%s AND SUID=%s) OR (RUID=%s AND SUID=%s)', 
+                       (hashed_receiver_uid, hashed_sender_uid, hashed_sender_uid, hashed_receiver_uid))
+        results = cursor.fetchall()
+        
+        if not results:
             print("No message found for this user")
             return jsonify({'message': "No message found for this user"})
 
         private_key_pem = session.get('private_key')
         if not private_key_pem:
+            print("Private key not found")
             return jsonify({'message': "Private key not found"})
+
+        # Ensure private_key_pem is in bytes format
+        if isinstance(private_key_pem, str):
+            private_key_pem = private_key_pem.encode('utf-8')
 
         # Deserialize the private key from PEM format
         private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
 
         decrypted_messages = []
         timestamps = []
+        msg_types = []
 
-        for row in result:
-            encrypted_message, public_key_data, encrypted_des3_key, nonce, tag, timestamp = row
+        for row in results:
+            sendMessage, SUID, RUID, public_key_data, encrypted_des3_key, nonce, tag, timestamp = row
 
-            encrypted_message = base64.b64decode(encrypted_message)
+            # Determine the message type
+            if RUID == hashed_receiver_uid and SUID == hashed_sender_uid:
+                msg_type = 'sent'
+            elif SUID == hashed_receiver_uid and RUID == hashed_sender_uid:
+                msg_type = 'received'
+
+            encrypted_message = base64.b64decode(sendMessage)
             encrypted_des3_key = base64.b64decode(encrypted_des3_key)
             nonce = base64.b64decode(nonce)
             tag = base64.b64decode(tag)
@@ -267,102 +256,16 @@ def decrypt_messages():
 
             decrypted_messages.append(decrypted_message.decode('utf-8'))
             timestamps.append(timestamp)
+            msg_types.append(msg_type)
 
-        return jsonify({'messages': decrypted_messages, 'timestamps': timestamps})
-    except Exception as e:
-        return jsonify({'message': f"An error occurred: {str(e)}"})
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# @app.route('/decrypt', methods=['POST'])
-# def decrypt():
-#     try:
-#         dusername = request.form['decryption-username']
-#         dpassword = request.form['decryption-password'].encode('utf-8')
-
-#         cursor.execute("SELECT password FROM users WHERE username=%s AND UID = %s", (dusername, global_uid))
-#         valid = cursor.fetchone()
-
-        if valid and valid[0] == hashlib.sha512(dpassword).hexdigest():
-            cursor.execute('SELECT sendMessage, public_key, encrypted_des3_key, nonce, tag FROM message WHERE UID=%s', (global_uid,))
-            result = cursor.fetchone()
-            encrypted_message, public_key_data, encrypted_des3_key, nonce, tag = result
-
-            encrypted_message = base64.b64decode(encrypted_message)
-            encrypted_des3_key = base64.b64decode(encrypted_des3_key)
-            nonce = base64.b64decode(nonce)
-            tag = base64.b64decode(tag)
-
-            # Load the sender's public key
-            sender_public_key = serialization.load_pem_public_key(public_key_data.encode('utf-8'), backend=default_backend())
-
-            # Retrieve the private key for decryption
-            private_key_pem = session.get('private_key')
-            if not private_key_pem:
-                return jsonify({'message': "Private key not found"})
-
-            # Deserialize the private key from PEM format
-            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-
-            # Decrypt the 3DES key using RSA
-            des3_key = private_key.decrypt(
-                encrypted_des3_key,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None
-                )
-            )
-
-            # Decrypt the message using 3DES
-            cipher_des3 = DES3.new(des3_key, DES3.MODE_EAX, nonce=nonce)
-            decrypted_message = cipher_des3.decrypt_and_verify(encrypted_message, tag)
-
-            return jsonify({'message': decrypted_message.decode('utf-8')})
-        else:
-            return jsonify({'message': "Wrong user"})
+        return jsonify({
+            'messages': decrypted_messages, 
+            'timestamps': timestamps, 
+            'msg_types': msg_types
+        })
     except Exception as e:
         return jsonify({'message': f"An error occurred: {str(e)}"})
     
-
-
-
-
-
-
-
-
-
-# @app.route('/set_session/<username>')
-# def set_session(username):
-#     session['username'] = username
-#     return f'Session variable set for username: {username}'
-
-# @app.route('/get_session')
-# def get_session():
-#     username = session.get('username')
-#     return {'username': username}
-
 
 
 

@@ -18,12 +18,12 @@
     word-wrap: break-word; 
   }
   
-  .message-container.sender {
+  .message-container.sent {
     background-color: #dcf8c6;
     align-self: flex-end;
   }
   
-  .message-container.receiver {
+  .message-container.received {
     background-color: #ffffff;
     align-self: flex-start;
   }

@@ -19,7 +19,7 @@ const LoginPage = () => {
 
       if(response.data.message === 'Login successful'){
         const userData = response.data.user;
-        localStorage.setItem('user', JSON.stringify(userData));
+        localStorage.setItem('user', JSON.stringify(userData.username));
       
         navigate('/chat');
       }

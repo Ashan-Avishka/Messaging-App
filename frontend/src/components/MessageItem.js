@@ -2,8 +2,8 @@ import React from 'react';
 import { formatTimestamp } from '../utils/utils';
 import './MessageItem.css'; 
 
-const MessageItem = ({ message, isSender }) => (
-  <div className={`message-container ${isSender ? 'sender' : 'receiver'}`}>
+const MessageItem = ({ message}) => (
+  <div className={`message-container ${message.msgType}`}>
     <div className="message-header">
       <div className="sender-name">{message.sender}</div>
     </div>
