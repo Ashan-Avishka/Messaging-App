@@ -1,4 +1,5 @@
-from flask import Flask, render_template, request, session, jsonify
+from flask import Flask, render_template, request, session, jsonify, g
+from flask_session import Session
 from flask_cors import CORS
 import mysql.connector
 import hashlib
@@ -9,23 +10,29 @@ from Crypto.Cipher import DES3
 from Crypto.Random import get_random_bytes
 import base64
 from db_config import get_db_connection
+from auth_decorator import login_required
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
-CORS(app)  # To allow cross-origin requests from your React frontend
+cors = CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": "http://localhost:3000"}})  
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_PERMANENT'] = False
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_KEY_PREFIX'] = 'session:'
+app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+app.config['SESSION_COOKIE_SECURE'] = True 
+Session(app)
 
-# Dummy user data
-# users = {
-#     'user1@example.com': 'password1',
-#     'user2@example.com': 'password2',
-#     'user3@example.com': 'password3'
-# }
 
-user_data = {
-    'user1@example.com': {'name': 'User One', 'email': 'user1@example.com'},
-    'user2@example.com': {'name': 'User Two', 'email': 'user2@example.com'},
-    'user3@example.com': {'name': 'User Three', 'email': 'user3@example.com'}
-}
+db = mysql.connector.connect(
+    host="localhost",
+    user="root",
+    password="root",
+    database="cryptography"
+)
+cursor = db.cursor()
 
 # fetch all users data from database
 def get_all_users():
@@ -42,6 +49,22 @@ def get_all_users():
     
     return users
 
+
+def get_all_messages():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    
+    query = "SELECT * FROM message" 
+    cursor.execute(query)
+    
+    messages = cursor.fetchall()
+    
+    cursor.close()
+    connection.close()
+    
+    return messages
+
+
 # check that email is already exists or not
 def email_exists(email):
     connection = get_db_connection()
@@ -57,6 +80,8 @@ def email_exists(email):
     
     return user is not None
 
+
+# creating a new user
 def create_user(username, email, password):
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
@@ -83,71 +108,62 @@ def signup():
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
-    
     email = data.get('email')
     password = data.get('password')
 
     if not email or not password:
         return jsonify({"error": "Email and password are required"}), 400
-
+    
     users = get_all_users()
     user = next((u for u in users if u['email'] == email), None)
-
+    
     if user and user['password'] == password:
-        return jsonify({"message": "Login successful", "user": user}), 200
+        session['user_id'] = user['uid']
+        response = jsonify({"message": "Login successful", "user": user})
+        return response
     else:
         return jsonify({"error": "Invalid credentials"}), 401
+  
 
-
-
-
-
-
-
-
-
-db = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="root",
-    database="cryptography"
-)
-cursor = db.cursor()
-
-# @app.route('/')
-# def login():
-#     return render_template('Signup.html')
-
-@app.route('/dashboard', methods=['POST'])
-def dashboard():
+@app.route('/api/users', methods=['GET'])
+def user_list(): 
+    current_user_id = session.get('user_id')
     try:
-        username = request.form['username']
-        password = request.form['password']
-        role = request.form['role']
-
-        hashed_password = hashlib.sha512(password.encode('utf-8')).hexdigest()
-
-        cursor.execute("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", (username, hashed_password, role))
-        db.commit()
-
-        cursor.execute('SELECT UID FROM users ORDER BY UID DESC LIMIT 1')
-        UID = cursor.fetchone()
-        global global_uid 
-        global_uid = int(UID[0])
-
-        return render_template('dashboard.html')
+        users = get_all_users()
+        filtered_users = [user for user in users if user['uid'] != current_user_id]
+        return jsonify(filtered_users), 200
     except Exception as e:
-        return f"An error occurred: {str(e)}"
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/encrypt', methods=['POST'])
+
+@app.route('/api/messages', methods=['GET'])
+def load_messages():
+    try:
+        messages = get_all_messages()
+        return jsonify(messages), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+
+@app.route('/api/messages', methods=['POST'])
 def encrypt():
     try:
-        message = request.form['original-message']
-        role = request.form['role']
+        data = request.json
+        message = data.get('text')
+        sender_uid = session.get('user_id')
+        reciever_uid = data.get('reciever')
+        timestamp = data.get('timestamp')
+
+        # Hash the sender and receiver UIDs
+        hashed_sender_uid = hashlib.sha256(str(sender_uid).encode('utf-8')).hexdigest()
+        hashed_reciever_uid = hashlib.sha256(str(reciever_uid).encode('utf-8')).hexdigest()
 
         # Generate RSA key pair for this session
-        private_key = session.get('private_key')
-        if not private_key:
+        private_key_pem = session.get('private_key')
+        if not private_key_pem:
             private_key = rsa.generate_private_key(
                 public_exponent=65537,
                 key_size=2048,
@@ -158,10 +174,9 @@ def encrypt():
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=serialization.NoEncryption()
             )
-            session['private_key'] = private_key_pem 
-        
-        # Deserialize the private key from PEM format
-        private_key = serialization.load_pem_private_key(private_key, password=None, backend=default_backend())
+            session['private_key'] = private_key_pem
+        else:
+            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
         
         public_key = private_key.public_key()
 
@@ -180,32 +195,113 @@ def encrypt():
             )
         )
 
-        cursor.execute('SELECT * FROM users WHERE role= %s AND UID= %s', (role, global_uid))
-        valid = cursor.fetchone()
+        # Insert encrypted message and keys into the database
+        cursor.execute('INSERT INTO message (sendMessage, SUID, RUID, public_key, encrypted_des3_key, nonce, tag, timestamp) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
+                       (base64.b64encode(ciphertext).decode('utf-8'), 
+                        hashed_sender_uid,  
+                        hashed_reciever_uid,
+                        public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode('utf-8'), 
+                        base64.b64encode(encrypted_des3_key).decode('utf-8'),
+                        base64.b64encode(cipher_des3.nonce).decode('utf-8'),
+                        base64.b64encode(tag).decode('utf-8'),
+                        timestamp)),
+        
+        db.commit()
 
-        if valid:
-            cursor.execute('INSERT INTO message (sendMessage, UID, public_key, encrypted_des3_key, nonce, tag) VALUES (%s, %s, %s, %s, %s, %s)',
-                           (base64.b64encode(ciphertext).decode('utf-8'), 
-                            global_uid, 
-                            public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo).decode('utf-8'), 
-                            base64.b64encode(encrypted_des3_key).decode('utf-8'),
-                            base64.b64encode(cipher_des3.nonce).decode('utf-8'),
-                            base64.b64encode(tag).decode('utf-8')))
-            db.commit()
-            return render_template('dashboard.html', encrypted_message="Message encrypted successfully")
-        else:
-            return render_template('dashboard.html', encrypted_message="No data sent")
+        return jsonify({"message": "Message encrypted and stored successfully"})
+
     except Exception as e:
         return f"An error occurred: {str(e)}"
+    
 
-@app.route('/decrypt', methods=['POST'])
-def decrypt():
+
+@app.route('/api/messages/decrypt', methods=['POST'])
+def decrypt_messages():
     try:
-        dusername = request.form['decryption-username']
-        dpassword = request.form['decryption-password'].encode('utf-8')
+        data = request.json
+        sender_uid = session.get('user_id')
+        receiver_uid = data.get('receiver')
 
-        cursor.execute("SELECT password FROM users WHERE username=%s AND UID = %s", (dusername, global_uid))
-        valid = cursor.fetchone()
+        # Hash the receiver UID to match the stored value
+        hashed_receiver_uid = hashlib.sha256(str(receiver_uid).encode('utf-8')).hexdigest()
+        hashed_sender_uid = hashlib.sha256(str(sender_uid).encode('utf-8')).hexdigest()
+
+        # Retrieve the encrypted message and keys from the database for the specific user
+        cursor.execute('SELECT sendMessage, public_key, encrypted_des3_key, nonce, tag, timestamp FROM message WHERE (RUID=%s AND SUID=%s) OR (RUID=%s AND SUID=%s)', (hashed_receiver_uid, hashed_sender_uid, hashed_sender_uid, hashed_receiver_uid))
+        result = cursor.fetchall()
+        if not result:
+            print("No message found for this user")
+            return jsonify({'message': "No message found for this user"})
+
+        private_key_pem = session.get('private_key')
+        if not private_key_pem:
+            return jsonify({'message': "Private key not found"})
+
+        # Deserialize the private key from PEM format
+        private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
+
+        decrypted_messages = []
+        timestamps = []
+
+        for row in result:
+            encrypted_message, public_key_data, encrypted_des3_key, nonce, tag, timestamp = row
+
+            encrypted_message = base64.b64decode(encrypted_message)
+            encrypted_des3_key = base64.b64decode(encrypted_des3_key)
+            nonce = base64.b64decode(nonce)
+            tag = base64.b64decode(tag)
+
+            # Decrypt the 3DES key using RSA
+            des3_key = private_key.decrypt(
+                encrypted_des3_key,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+
+            # Decrypt the message using 3DES
+            cipher_des3 = DES3.new(des3_key, DES3.MODE_EAX, nonce=nonce)
+            decrypted_message = cipher_des3.decrypt_and_verify(encrypted_message, tag)
+
+            decrypted_messages.append(decrypted_message.decode('utf-8'))
+            timestamps.append(timestamp)
+
+        return jsonify({'messages': decrypted_messages, 'timestamps': timestamps})
+    except Exception as e:
+        return jsonify({'message': f"An error occurred: {str(e)}"})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# @app.route('/decrypt', methods=['POST'])
+# def decrypt():
+#     try:
+#         dusername = request.form['decryption-username']
+#         dpassword = request.form['decryption-password'].encode('utf-8')
+
+#         cursor.execute("SELECT password FROM users WHERE username=%s AND UID = %s", (dusername, global_uid))
+#         valid = cursor.fetchone()
 
         if valid and valid[0] == hashlib.sha512(dpassword).hexdigest():
             cursor.execute('SELECT sendMessage, public_key, encrypted_des3_key, nonce, tag FROM message WHERE UID=%s', (global_uid,))
@@ -247,6 +343,47 @@ def decrypt():
             return jsonify({'message': "Wrong user"})
     except Exception as e:
         return jsonify({'message': f"An error occurred: {str(e)}"})
+    
+
+
+
+
+
+
+
+
+
+# @app.route('/set_session/<username>')
+# def set_session(username):
+#     session['username'] = username
+#     return f'Session variable set for username: {username}'
+
+# @app.route('/get_session')
+# def get_session():
+#     username = session.get('username')
+#     return {'username': username}
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
