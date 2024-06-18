@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import PrimaryBtn from '../components/PrimaryBtn';
 import { signup } from '../services/api';
+import { Button, Container } from 'react-bootstrap';
+import './styles/SignupPage.css';
 
 const SignupPage = () => {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [conpassword, setConPassword] = useState('');
   const navigate = useNavigate();
 
   const handleSignup = async (e) => {
@@ -30,24 +34,32 @@ const SignupPage = () => {
   };
 
   return (
-    <div>
-      <h2>Signup</h2>
+    <div className='containter-signup'>
+      <div className='content-signup'>
+      <h2>Create an Account</h2><br/>
       <form onSubmit={handleSignup}>
-      <div>
-          <label>Username:</label>
-          <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} required />
+
+        <div class="input-group mb-3">
+          <input type="text" class="form-control" value={username} onChange={(e) => setUsername(e.target.value)} placeholder='Username' required />
         </div>
-        <div>
-          <label>Email:</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+
+        <div class="input-group mb-3">
+          <input type="email" class="form-control" value={email} onChange={(e) => setEmail(e.target.value)} placeholder='Email' required />
         </div>
-        <div>
-          <label>Password:</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+
+        <div class="input-group mb-3">
+          <input type="password" class="form-control" value={password} onChange={(e) => setPassword(e.target.value)} placeholder='Password' required />
         </div>
-        <button type="submit">Signup</button>
+
+        <div class="input-group mb-3">
+          <input type="password" class="form-control" value={conpassword} onChange={(e) => setConPassword(e.target.value)} placeholder='Confirm Password' required />
+        </div><br/>
+
+        <PrimaryBtn text={'Back to Login'} className='secondary-btn gap' onClick={goToLogin}>Back to Login</PrimaryBtn>
+        <PrimaryBtn type="submit" className='primary-btn' text={'Signup'}></PrimaryBtn>
       </form>
-      <button onClick={goToLogin}>Back to Login</button>
+      
+    </div>
     </div>
   );
 };
